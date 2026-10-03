@@ -17,6 +17,9 @@
 - 手动选择教学/办公区或宿舍区，避免校园网网关互通造成误判
 - 提供实验性的自动顺序尝试模式，优先尝试教学区
 - 定时检测直连网络状态，避免代理造成在线误判
+- 可强制通过校园网物理网卡直连，绕过 Clash、Mihomo、V2Ray 等代理的 TUN/Fake-IP
+- 教学/办公区优先核验 SRun 认证会话；即使百度等白名单网页可打开，认证失效也会立即重连
+- 使用两个独立且不可缓存的外网请求复核网络，避免单个检测页造成假在线
 - 教学/办公区使用 SRun challenge 加密认证
 - 宿舍区使用 ePortal 认证接口
 - 仅在断网时尝试登录，不会在联网正常时重复认证
@@ -44,7 +47,7 @@
 
 不需要安装 Python，适合大多数用户：
 
-1. 打开 [Releases 页面](https://github.com/Georgeupup/szu-network-guardian/releases/latest)。
+1. 打开 [Releases 页面](https://github.com/doublenuo/szu-network-guardian/releases/latest)。
 2. 下载最新版 `SZU-Network-Guardian-v*.exe`。
 3. 双击 EXE 即可运行，无需安装。
 
@@ -57,6 +60,7 @@
 5. 点击“开始守护”。
 6. 关闭或最小化窗口时程序不会退出，而是隐藏到系统托盘继续监控（单击/双击托盘图标或选择“打开主界面”恢复）。
 7. 真正退出：托盘菜单“退出程序”，或界面右下角的“退出程序”按钮。
+   使用代理软件时保持“检测和认证强制直连（推荐）”处于勾选状态。
 
 ### 方式二：使用源码运行
 
@@ -95,7 +99,7 @@ npm run build
 安装构建出的 deb（推荐，会装到 `/usr/bin/szu-network-guardian` 并写入应用菜单图标）：
 
 ```bash
-sudo dpkg -i "src-tauri/target/release/bundle/deb/SZU Network Guardian_1.2.0_amd64.deb"
+sudo dpkg -i "src-tauri/target/release/bundle/deb/SZU Network Guardian_1.2.2_amd64.deb"
 ```
 
 > [!IMPORTANT]
@@ -137,7 +141,7 @@ sudo apt install python3-tk
 构建脚本会创建独立的 `.venv-build` 环境、执行自动化测试，并生成：
 
 ```text
-dist\SZU-Network-Guardian-v1.2.0.exe
+dist\SZU-Network-Guardian-v1.2.2.exe
 ```
 
 也可以在仓库的 [Actions 页面](https://github.com/doublenuo/szu-network-guardian/actions/workflows/build-windows.yml) 手动运行构建流程，然后下载 Windows、Ubuntu 和 Android 构建产物。
@@ -173,7 +177,33 @@ Windows 完整日志：
 
 日志使用 `guardian-YYYY-MM-DD.log` 命名。程序启动时和运行期间会自动清理 7 天前的日志。
 
-Windows 开机自启使用当前用户注册表项：
+## 与代理软件同时使用
+
+程序默认勾选“检测和认证强制直连（推荐）”。开启后会：
+
+1. 排除代理常用的 `198.18.0.0/15` Fake-IP 地址段。
+2. 找到电脑真实的校园网有线或无线网卡。
+3. 自动读取物理网卡通过 DHCP 获得的 DNS，并通过该网卡执行独立查询。
+4. 将联网检测和校园网认证绑定到物理网卡，不经过系统代理或 TUN 虚拟网卡。
+
+程序会优先使用与校园网 IPv4 地址属于同一物理网卡的 DNS。即使校园网调整 DNS 地址，也无需先连接外网或手动修改配置；当网卡未提供可用 DNS 时，程序才会依次尝试内置的校园网和公共 DNS 作为兜底。
+
+正常日志会显示：
+
+```text
+网络连接正常（校园网直连）
+```
+
+教学/办公区每次检测还会先核验深澜认证会话。校园网注销后，即使百度首页等少数网页仍可访问，也会出现下面的日志并触发登录：
+
+```text
+检测到校园网认证已失效，正在重新认证…
+正在使用教学 / 办公区认证…
+```
+
+如果直连模式提示找不到物理网卡，请先确认电脑仍连接校园有线网络或 `SZU_WLAN`。只有在未使用代理、且直连模式确实无法适配当前网络时，才建议取消勾选。
+
+开机自启使用当前用户注册表项：
 
 ```text
 HKEY_CURRENT_USER\Software\Microsoft\Windows\CurrentVersion\Run
@@ -207,6 +237,7 @@ Linux 开机自启使用：
 ├── android/                 # Android 原生客户端（Kotlin + Compose）
 ├── szu_guardian/
 │   ├── local_log.py         # 本地日志与自动清理
+│   ├── direct_network.py    # 物理网卡绑定与直连 DNS
 │   ├── monitor.py           # 后台监控
 │   ├── network.py           # 网络检测与认证入口
 │   ├── srun.py              # SRun 协议实现

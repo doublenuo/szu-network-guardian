@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import platform
 import re
+import secrets
 import time
 from dataclasses import dataclass
 from typing import Callable
@@ -11,6 +12,7 @@ from urllib.parse import urlparse
 import requests
 import urllib3
 
+from .direct_network import DirectRoute
 from .models import (
     AppConfig,
     ZONE_AUTO,
@@ -24,10 +26,9 @@ urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 DORMITORY_LOGIN_URL = "http://172.30.255.42:801/eportal/portal/login/"
 
-CHECK_TARGETS = (
-    ("https://www.baidu.com/favicon.ico", "baidu"),
-    ("http://www.msftconnecttest.com/connecttest.txt", "Microsoft Connect Test"),
-)
+MICROSOFT_CHECK_URL = "http://www.msftconnecttest.com/connecttest.txt"
+MICROSOFT_CHECK_TEXT = "Microsoft Connect Test"
+BAIDU_SEARCH_URL = "https://www.baidu.com/s"
 
 HEADERS = {
     "User-Agent": (
@@ -83,35 +84,100 @@ class NetworkClient:
             active_session.headers.update(HEADERS)
         self.sleeper = sleeper
         self.verify_delays = verify_delays
+        self._allow_direct_setup = session is None and portal_session is None
+        self.direct_route: DirectRoute | None = None
+
+    def _configure_direct(self, enabled: bool) -> None:
+        if not enabled or not self._allow_direct_setup or self.direct_route:
+            return
+        route = DirectRoute.discover()
+        self.direct_route = route
+        self.session = route.session()
+        self.portal_session = route.session()
+        self.session.headers.update(HEADERS)
+        self.portal_session.headers.update(HEADERS)
+
+    def _get_check_target(self, url: str) -> requests.Response:
+        if not self.direct_route:
+            return self.session.get(
+                url,
+                timeout=(3, 5),
+                allow_redirects=True,
+            )
+        direct_url, original_host = self.direct_route.rewrite_url(url)
+        return self.session.get(
+            direct_url,
+            headers={"Host": original_host},
+            timeout=(3, 5),
+            allow_redirects=False,
+            verify=False,
+        )
 
     def check_connection(self) -> ConnectionResult:
         started = time.perf_counter()
         errors: list[str] = []
+        probe_token = f"szu_guardian_{secrets.token_hex(8)}"
+        targets = (
+            (MICROSOFT_CHECK_URL, MICROSOFT_CHECK_TEXT, None),
+            (f"{BAIDU_SEARCH_URL}?wd={probe_token}", "baidu_search", probe_token),
+        )
+        successful_probes = 0
 
-        for url, expected in CHECK_TARGETS:
+        for url, expected, token in targets:
             try:
-                response = self.session.get(
-                    url,
-                    timeout=(3, 5),
-                    allow_redirects=True,
-                )
-                if expected == "baidu":
-                    final_host = urlparse(response.url).hostname or ""
-                    valid = response.status_code == 200 and final_host.endswith("baidu.com")
+                response = self._get_check_target(url)
+                if expected == "baidu_search":
+                    location = response.headers.get("Location", "")
+                    redirect_host = urlparse(location).hostname or ""
+                    redirect_is_baidu = not redirect_host or redirect_host.endswith(
+                        ".baidu.com"
+                    )
+                    response_text = response.text + " " + location
+                    valid = (
+                        response.status_code in (200, 301, 302, 303, 307, 308)
+                        and redirect_is_baidu
+                        and bool(token and token in response_text)
+                    )
                 else:
                     valid = (
                         response.status_code == 200
                         and expected in response.text
                     )
                 if valid:
-                    latency = round((time.perf_counter() - started) * 1000)
-                    return ConnectionResult(True, "网络连接正常", latency)
-                errors.append(f"检测页返回 {response.status_code}")
+                    successful_probes += 1
+                else:
+                    errors.append(f"检测页返回 {response.status_code}")
             except requests.RequestException as exc:
                 errors.append(type(exc).__name__)
 
+        if successful_probes == len(targets):
+            latency = round((time.perf_counter() - started) * 1000)
+            mode = "（校园网直连）" if self.direct_route else ""
+            return ConnectionResult(True, f"网络连接正常{mode}", latency)
+
         detail = " / ".join(errors[-2:]) if errors else "无响应"
         return ConnectionResult(False, f"直连外网不可用（{detail}）")
+
+    def _teaching_srun_client(self, config: AppConfig) -> SrunClient:
+        base_url = "https://net.szu.edu.cn"
+        host_header = None
+        if self.direct_route:
+            teaching_ip = self.direct_route.resolve("net.szu.edu.cn")[0]
+            base_url = f"https://{teaching_ip}"
+            host_header = "net.szu.edu.cn"
+        return SrunClient(
+            config.username,
+            config.password,
+            session=self.portal_session,
+            base_url=base_url,
+            host_header=host_header,
+        )
+
+    def _teaching_online_status(self, config: AppConfig) -> bool | None:
+        try:
+            return self._teaching_srun_client(config).is_online()
+        except (ConnectionError, requests.RequestException):
+            return None
 
     def _login_dormitory(self, config: AppConfig) -> str:
         response = self.portal_session.get(
@@ -136,11 +202,7 @@ class NetworkClient:
         return message or "宿舍区认证成功"
 
     def _login_teaching(self, config: AppConfig) -> str:
-        result = SrunClient(
-            config.username,
-            config.password,
-            session=self.portal_session,
-        ).login()
+        result = self._teaching_srun_client(config).login()
         if not result.success:
             raise ConnectionError(
                 f"教学 / 办公区认证失败：{result.message or '请检查账号和密码'}"
@@ -186,9 +248,17 @@ class NetworkClient:
         config: AppConfig,
         progress_callback: ProgressCallback | None = None,
     ) -> ConnectionResult:
-        current = self.check_connection()
-        if current.connected:
-            return current
+        self._configure_direct(config.direct_mode)
+        authentication_expired = False
+        if config.zone == ZONE_OFFICE:
+            authentication_expired = self._teaching_online_status(config) is False
+            if authentication_expired and progress_callback:
+                progress_callback("检测到校园网认证已失效，正在重新认证…")
+
+        if not authentication_expired:
+            current = self.check_connection()
+            if current.connected:
+                return current
 
         login_message = self.send_login(config, progress_callback)
         if progress_callback:

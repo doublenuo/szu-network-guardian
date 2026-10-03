@@ -161,6 +161,7 @@ class ConfigStore:
                 interval_minutes=int(payload.get("interval_minutes", 1)),
                 autostart=bool(payload.get("autostart", False)),
                 start_on_launch=bool(payload.get("start_on_launch", True)),
+                direct_mode=bool(payload.get("direct_mode", True)),
             )
         except (OSError, ValueError, TypeError, json.JSONDecodeError):
             return AppConfig()
@@ -168,7 +169,7 @@ class ConfigStore:
     def save(self, config: AppConfig) -> None:
         self.path.parent.mkdir(parents=True, exist_ok=True)
         payload = config.public_dict()
-        payload["schema_version"] = 2
+        payload["schema_version"] = 3
         if sys.platform == "win32":
             payload["password_dpapi"] = protect_secret(config.password)
         elif _save_keyring_password(config.username, config.password):

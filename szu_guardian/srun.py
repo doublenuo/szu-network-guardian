@@ -133,10 +133,12 @@ class SrunClient:
         password: str,
         session: requests.Session | None = None,
         base_url: str = SRUN_BASE_URL,
+        host_header: str | None = None,
     ):
         self.username = username
         self.password = password
         self.base_url = base_url.rstrip("/")
+        self.host_header = host_header
         self.session = session or requests.Session()
         self.session.trust_env = False
         self.session.headers.update(
@@ -149,29 +151,61 @@ class SrunClient:
         )
 
     def _get_jsonp(self, path: str, params: dict[str, str]) -> dict[str, Any]:
+        headers = {"Host": self.host_header} if self.host_header else None
         response = self.session.get(
             f"{self.base_url}{path}",
             params=params,
+            headers=headers,
             timeout=(4, 10),
             verify=False,
+            allow_redirects=False,
         )
         response.raise_for_status()
         return _parse_jsonp(response.text)
 
     def discover_ac_id(self) -> str:
+        headers = {"Host": self.host_header} if self.host_header else None
         try:
             response = self.session.get(
                 f"{self.base_url}/",
+                headers=headers,
                 timeout=(3, 7),
                 verify=False,
-                allow_redirects=True,
+                allow_redirects=not bool(self.host_header),
             )
-            match = re.search(r"ac_id=(\d+)", response.text)
+            search_text = response.text + " " + response.headers.get("Location", "")
+            match = re.search(r"ac_id=(\d+)", search_text)
             if match:
                 return match.group(1)
+            if self.host_header:
+                response = self.session.get(
+                    f"{self.base_url}/index_1.html",
+                    headers=headers,
+                    timeout=(3, 7),
+                    verify=False,
+                    allow_redirects=False,
+                )
+                match = re.search(r"ac_id=(\d+)", response.text)
+                if match:
+                    return match.group(1)
         except requests.RequestException:
             pass
         return "1"
+
+    def is_online(self) -> bool | None:
+        """Return the SRun session state, or ``None`` when it is unknown."""
+        status_data = self._get_jsonp(
+            "/cgi-bin/rad_user_info",
+            {"callback": "_"},
+        )
+        result = str(
+            status_data.get("error") or status_data.get("res") or ""
+        ).strip().lower()
+        if result == "not_online_error":
+            return False
+        if result == "ok":
+            return True
+        return None
 
     def login(self) -> SrunLoginResult:
         ac_id = self.discover_ac_id()
