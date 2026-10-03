@@ -3,6 +3,7 @@ from __future__ import annotations
 import datetime as dt
 import queue
 import tkinter as tk
+import platform
 from collections import deque
 from tkinter import messagebox, ttk
 
@@ -35,6 +36,10 @@ ZONE_LABELS = {
 }
 ZONE_NAMES = {value: key for key, value in ZONE_LABELS.items()}
 UI_LOG_RETENTION = dt.timedelta(hours=3)
+# Tk on Ubuntu may not enumerate TTC-based Noto CJK fonts even when fontconfig
+# can find them. Song Ti is exposed by Tk and has complete Simplified Chinese
+# glyph coverage in the supported Linux desktop image.
+UI_FONT = "Microsoft YaHei UI" if platform.system() == "Windows" else "Song Ti"
 
 
 class GuardianApp:
@@ -51,6 +56,12 @@ class GuardianApp:
         self.tray_notice_shown = False
 
         self.root = tk.Tk()
+        if platform.system() == "Linux":
+            # Tk's X11 text renderer is antialiased through Xft, but its
+            # default 96-DPI small glyphs look harsh on modern HiDPI screens.
+            # A modest scale keeps Chinese glyphs readable without changing
+            # the window's logical layout on Windows.
+            self.root.tk.call("tk", "scaling", 1.15)
         self.root.title("SZU 网络守护")
         self.root.geometry("680x800")
         self.root.minsize(620, 720)
@@ -95,37 +106,37 @@ class GuardianApp:
             "TLabel",
             background=COLORS["background"],
             foreground=COLORS["text"],
-            font=("Microsoft YaHei UI", 10),
+            font=(UI_FONT, 10),
         )
         style.configure(
             "Card.TLabel",
             background=COLORS["card"],
             foreground=COLORS["text"],
-            font=("Microsoft YaHei UI", 10),
+            font=(UI_FONT, 10),
         )
         style.configure(
             "Muted.Card.TLabel",
             background=COLORS["card"],
             foreground=COLORS["muted"],
-            font=("Microsoft YaHei UI", 9),
+            font=(UI_FONT, 9),
         )
         style.configure(
             "Title.TLabel",
             background=COLORS["background"],
             foreground=COLORS["text"],
-            font=("Microsoft YaHei UI", 22, "bold"),
+            font=(UI_FONT, 22, "bold"),
         )
         style.configure(
             "Subtitle.TLabel",
             background=COLORS["background"],
             foreground=COLORS["muted"],
-            font=("Microsoft YaHei UI", 9),
+            font=(UI_FONT, 9),
         )
         style.configure(
             "Section.Card.TLabel",
             background=COLORS["card"],
             foreground=COLORS["text"],
-            font=("Microsoft YaHei UI", 11, "bold"),
+            font=(UI_FONT, 11, "bold"),
         )
         style.configure(
             "TEntry",
@@ -134,7 +145,7 @@ class GuardianApp:
             lightcolor=COLORS["border"],
             darkcolor=COLORS["border"],
             padding=(10, 8),
-            font=("Microsoft YaHei UI", 10),
+            font=(UI_FONT, 10),
         )
         style.configure(
             "TCombobox",
@@ -143,20 +154,20 @@ class GuardianApp:
             bordercolor=COLORS["border"],
             arrowsize=15,
             padding=(8, 7),
-            font=("Microsoft YaHei UI", 10),
+            font=(UI_FONT, 10),
         )
         style.configure(
             "TSpinbox",
             fieldbackground="#F8FAFC",
             bordercolor=COLORS["border"],
             padding=(8, 7),
-            font=("Microsoft YaHei UI", 10),
+            font=(UI_FONT, 10),
         )
         style.configure(
             "TCheckbutton",
             background=COLORS["card"],
             foreground=COLORS["text"],
-            font=("Microsoft YaHei UI", 9),
+            font=(UI_FONT, 9),
         )
         style.map(
             "TCheckbutton",
@@ -168,7 +179,7 @@ class GuardianApp:
             foreground="#FFFFFF",
             borderwidth=0,
             padding=(18, 10),
-            font=("Microsoft YaHei UI", 10, "bold"),
+            font=(UI_FONT, 10, "bold"),
         )
         style.map(
             "Primary.TButton",
@@ -183,7 +194,7 @@ class GuardianApp:
             foreground=COLORS["primary"],
             borderwidth=0,
             padding=(16, 10),
-            font=("Microsoft YaHei UI", 10),
+            font=(UI_FONT, 10),
         )
         style.map(
             "Secondary.TButton",
@@ -195,7 +206,7 @@ class GuardianApp:
             foreground=COLORS["muted"],
             borderwidth=0,
             padding=(8, 7),
-            font=("Microsoft YaHei UI", 9),
+            font=(UI_FONT, 9),
         )
         style.map(
             "Ghost.TButton",
@@ -377,7 +388,7 @@ class GuardianApp:
             borderwidth=0,
             background="#F8FAFC",
             foreground=COLORS["muted"],
-            font=("Microsoft YaHei UI", 9),
+            font=(UI_FONT, 9),
             padx=10,
             pady=8,
             wrap="word",
@@ -387,7 +398,7 @@ class GuardianApp:
 
         ttk.Label(
             outer,
-            text="最小化或关闭窗口后将在系统托盘继续守护 · 密码使用 DPAPI 加密",
+            text="最小化或关闭窗口后将在系统托盘继续守护 · 密码使用系统安全存储",
             style="Subtitle.TLabel",
         ).pack(anchor="center", pady=(10, 0))
 
@@ -473,7 +484,12 @@ class GuardianApp:
         try:
             while True:
                 event = self.events.get_nowait()
-                self._apply_event(event)
+                try:
+                    self._apply_event(event)
+                except Exception as exc:
+                    # Do not let a desktop integration failure stop the UI
+                    # event loop and hide network-monitoring results.
+                    self._append_log(f"界面状态更新失败：{exc}", "error")
         except queue.Empty:
             pass
         try:

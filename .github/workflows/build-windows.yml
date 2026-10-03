@@ -1,4 +1,4 @@
-name: Build Windows EXE
+name: Build desktop and Android packages
 
 on:
   workflow_dispatch:
@@ -7,7 +7,7 @@ on:
       - "v*"
 
 jobs:
-  build:
+  windows:
     runs-on: windows-latest
     permissions:
       contents: read
@@ -35,11 +35,85 @@ jobs:
           --clean
           --onefile
           --windowed
-          --name SZU-Network-Guardian-v1.1.1
+          --name SZU-Network-Guardian-v1.2.0
           main.py
 
       - name: Upload EXE
         uses: actions/upload-artifact@v4
         with:
           name: SZU-Network-Guardian-Windows
-          path: dist/SZU-Network-Guardian-v1.1.1.exe
+          path: dist/SZU-Network-Guardian-v1.2.0.exe
+
+  ubuntu:
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Tauri dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev \
+            libayatana-appindicator3-dev \
+            librsvg2-dev \
+            libssl-dev \
+            build-essential \
+            curl \
+            wget \
+            file
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install JavaScript dependencies
+        run: npm ci
+
+      - name: Build Ubuntu package
+        run: npm run tauri build -- --bundles deb
+
+      - name: Upload Ubuntu package
+        uses: actions/upload-artifact@v4
+        with:
+          name: SZU-Network-Guardian-Ubuntu
+          path: src-tauri/target/release/bundle/deb/*.deb
+
+  android:
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install Android platform
+        run: sdkmanager "platforms;android-35" "build-tools;35.0.0"
+
+      - name: Build Android APK
+        working-directory: android
+        run: ./gradlew assembleRelease
+
+      - name: Upload Android APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: SZU-Network-Guardian-Android
+          path: android/app/build/outputs/apk/release/app-release-unsigned.apk

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import platform
 import re
 import time
 from dataclasses import dataclass
@@ -30,7 +31,7 @@ CHECK_TARGETS = (
 
 HEADERS = {
     "User-Agent": (
-        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+        f"Mozilla/5.0 ({platform.system()}) "
         "AppleWebKit/537.36 Chrome/124 Safari/537.36"
     )
 }

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import threading
+import platform
 from collections.abc import Callable
 
 import pystray
@@ -20,10 +21,17 @@ def _icon_image(color: str = "#2563EB") -> Image.Image:
 class TrayController:
     def __init__(self, action_callback: Callable[[str], None]):
         self.action_callback = action_callback
+        # pystray's Xorg backend uses Latin-1 for the window title. Keep the
+        # title ASCII on Linux; the actual application UI remains Chinese.
+        self._title = (
+            "SZU Network Guardian"
+            if platform.system() == "Linux"
+            else "SZU 网络守护"
+        )
         self.icon = pystray.Icon(
             "szu_network_guardian",
             _icon_image(),
-            "SZU 网络守护",
+            self._title,
             menu=pystray.Menu(
                 pystray.MenuItem(
                     "打开主界面",
@@ -61,12 +69,31 @@ class TrayController:
             "stopped": ("#94A3B8", "已停止"),
         }
         color, label = styles.get(state, ("#2563EB", "运行中"))
-        self.icon.icon = _icon_image(color)
-        self.icon.title = f"SZU 网络守护 - {label}"
+        try:
+            self.icon.icon = _icon_image(color)
+            if platform.system() == "Linux":
+                linux_labels = {
+                    "网络正常": "Online",
+                    "守护中": "Guarding",
+                    "正在检测": "Checking",
+                    "正在重连": "Reconnecting",
+                    "网络异常": "Offline",
+                    "已停止": "Stopped",
+                    "运行中": "Running",
+                }
+                title = f"SZU Guardian - {linux_labels.get(label, 'Running')}"
+            else:
+                title = f"SZU 网络守护 - {label}"
+            self.icon.title = title
+        except (OSError, RuntimeError, UnicodeError):
+            # A desktop tray backend may reject updates (for example when the
+            # shell has no tray extension). Monitoring and the main window
+            # must continue to work in that case.
+            pass
 
     def notify(self, message: str) -> None:
         try:
-            self.icon.notify(message, "SZU 网络守护")
+            self.icon.notify(message, self._title)
         except (NotImplementedError, OSError):
             pass
 

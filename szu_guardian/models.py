@@ -14,7 +14,7 @@ class AppConfig:
     username: str = ""
     password: str = ""
     zone: str = ZONE_OFFICE
-    interval_minutes: int = 5
+    interval_minutes: int = 1
     autostart: bool = False
     start_on_launch: bool = True
 

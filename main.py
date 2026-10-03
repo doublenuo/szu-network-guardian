@@ -25,7 +25,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--autostart",
         action="store_true",
-        help="由 Windows 开机启动项调用；窗口将最小化并自动开始监控",
+        help="由系统开机启动项调用；窗口将最小化并自动开始监控",
     )
     return parser.parse_args()
 

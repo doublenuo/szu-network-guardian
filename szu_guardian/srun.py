@@ -12,6 +12,7 @@ import hashlib
 import hmac
 import json
 import re
+import platform
 from dataclasses import dataclass
 from typing import Any
 
@@ -141,7 +142,7 @@ class SrunClient:
         self.session.headers.update(
             {
                 "User-Agent": (
-                    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                    f"Mozilla/5.0 ({platform.system()}) "
                     "AppleWebKit/537.36 Chrome/124 Safari/537.36"
                 )
             }
@@ -225,8 +226,8 @@ class SrunClient:
                 "action": "login",
                 "username": self.username,
                 "password": "{MD5}" + password_md5,
-                "os": "Windows",
-                "name": "Windows",
+                "os": platform.system(),
+                "name": platform.system(),
                 "double_stack": "0",
                 "info": info,
                 "chksum": checksum,

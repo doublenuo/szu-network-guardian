@@ -12,6 +12,7 @@ from .models import AppConfig, ZONE_AUTO
 
 
 APP_DIRECTORY = "SZUNetworkGuardian"
+KEYRING_SERVICE = "SZU Network Guardian"
 
 
 class DATA_BLOB(ctypes.Structure):
@@ -34,7 +35,10 @@ def protect_secret(secret: str) -> str:
     if not secret:
         return ""
     if sys.platform != "win32":
-        raise OSError("安全保存密码仅支持 Windows")
+        # Linux uses the Secret Service backend when keyring is installed. The
+        # returned value is intentionally empty: the actual secret is stored
+        # in the desktop keyring, not in config.json.
+        return ""
 
     raw = secret.encode("utf-8")
     input_blob, input_buffer = _blob_from_bytes(raw)
@@ -97,10 +101,38 @@ def default_config_path() -> Path:
     override = os.environ.get("SZU_GUARDIAN_DATA_DIR")
     if override:
         return Path(override) / "config.json"
-    base = os.environ.get("LOCALAPPDATA")
-    if base:
-        return Path(base) / APP_DIRECTORY / "config.json"
+    if sys.platform == "win32":
+        base = os.environ.get("LOCALAPPDATA")
+        if base:
+            return Path(base) / APP_DIRECTORY / "config.json"
+    else:
+        base = os.environ.get("XDG_CONFIG_HOME")
+        if base:
+            return Path(base) / APP_DIRECTORY / "config.json"
     return Path.home() / f".{APP_DIRECTORY}" / "config.json"
+
+
+def _keyring_password(username: str) -> str:
+    if not username or sys.platform == "win32":
+        return ""
+    try:
+        import keyring
+
+        return keyring.get_password(KEYRING_SERVICE, username) or ""
+    except Exception:
+        return ""
+
+
+def _save_keyring_password(username: str, password: str) -> bool:
+    if not username or sys.platform == "win32":
+        return False
+    try:
+        import keyring
+
+        keyring.set_password(KEYRING_SERVICE, username, password)
+        return True
+    except Exception:
+        return False
 
 
 class ConfigStore:
@@ -113,6 +145,11 @@ class ConfigStore:
         try:
             payload = json.loads(self.path.read_text(encoding="utf-8"))
             password = unprotect_secret(str(payload.get("password_dpapi", "")))
+            if not password:
+                password = _keyring_password(str(payload.get("username", "")))
+            # Compatibility for Linux configs created before keyring support.
+            if not password:
+                password = str(payload.get("password_local", ""))
             schema_version = int(payload.get("schema_version", 1))
             zone = str(payload.get("zone", ZONE_AUTO))
             if schema_version < 2:
@@ -121,7 +158,7 @@ class ConfigStore:
                 username=str(payload.get("username", "")),
                 password=password,
                 zone=zone,
-                interval_minutes=int(payload.get("interval_minutes", 5)),
+                interval_minutes=int(payload.get("interval_minutes", 1)),
                 autostart=bool(payload.get("autostart", False)),
                 start_on_launch=bool(payload.get("start_on_launch", True)),
             )
@@ -132,10 +169,23 @@ class ConfigStore:
         self.path.parent.mkdir(parents=True, exist_ok=True)
         payload = config.public_dict()
         payload["schema_version"] = 2
-        payload["password_dpapi"] = protect_secret(config.password)
+        if sys.platform == "win32":
+            payload["password_dpapi"] = protect_secret(config.password)
+        elif _save_keyring_password(config.username, config.password):
+            payload["password_keyring"] = True
+        else:
+            # Keep the application usable on minimal/headless Linux installs.
+            # Restrict the file to the current user below.
+            payload["password_local"] = config.password
+            payload["password_storage_notice"] = "chmod-600-fallback"
         temporary = self.path.with_suffix(".tmp")
         temporary.write_text(
             json.dumps(payload, ensure_ascii=False, indent=2),
             encoding="utf-8",
         )
         temporary.replace(self.path)
+        if sys.platform != "win32":
+            try:
+                self.path.chmod(0o600)
+            except OSError:
+                pass

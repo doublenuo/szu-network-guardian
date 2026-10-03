@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import datetime as dt
 import os
+import subprocess
+import sys
 import threading
 from pathlib import Path
 
@@ -53,5 +55,7 @@ class LocalLog:
         self.directory.mkdir(parents=True, exist_ok=True)
         if os.name == "nt":
             os.startfile(self.directory)  # type: ignore[attr-defined]
+        elif sys.platform == "darwin":
+            subprocess.Popen(["open", str(self.directory)])
         else:
-            raise OSError("打开日志目录目前仅支持 Windows")
+            subprocess.Popen(["xdg-open", str(self.directory)])

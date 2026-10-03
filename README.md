@@ -1,17 +1,19 @@
 # SZU Network Guardian
 
-[![Build Windows EXE](https://github.com/Georgeupup/szu-network-guardian/actions/workflows/build-windows.yml/badge.svg)](https://github.com/Georgeupup/szu-network-guardian/actions/workflows/build-windows.yml)
+[![Build packages](https://github.com/doublenuo/szu-network-guardian/actions/workflows/build-windows.yml/badge.svg)](https://github.com/doublenuo/szu-network-guardian/actions/workflows/build-windows.yml)
 [![Python 3.10+](https://img.shields.io/badge/Python-3.10%2B-3776AB?logo=python&logoColor=white)](https://www.python.org/)
 [![Windows](https://img.shields.io/badge/Windows-10%20%7C%2011-0078D4?logo=windows11&logoColor=white)](https://www.microsoft.com/windows)
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 
-一个简洁、轻量的深圳大学校园网断线监控与自动重连工具。
+一个简洁、轻量的深圳大学校园网断线监控与自动重连工具，支持 Windows、Linux 和 Android。
+
+桌面端现在使用 Tauri 2 + React + TypeScript 构建。校园网认证协议继续由经过测试的 Python 核心负责，Tauri 通过本地 JSON 桥接调用它；这样 Linux 界面使用 WebKitGTK 原生渲染，不再依赖 Tkinter 字体和 X11 托盘行为。
 
 支持新版教学/办公区深澜 SRun 认证、宿舍区 ePortal 认证、系统托盘、开机自启和安全凭据存储。
 
 ## 功能特性
 
-- 简约的 Windows 图形界面
+- 简约的 Windows / Linux 图形界面
 - 手动选择教学/办公区或宿舍区，避免校园网网关互通造成误判
 - 提供实验性的自动顺序尝试模式，优先尝试教学区
 - 定时检测直连网络状态，避免代理造成在线误判
@@ -21,15 +23,15 @@
 - 认证成功后分阶段复查外网，避免过早报告失败
 - 最小化或关闭窗口后进入系统托盘继续运行
 - 托盘菜单支持打开界面、立即检测和退出
-- 支持当前 Windows 用户开机自启，无需管理员权限
-- 使用 Windows DPAPI 加密保存密码
+- 支持当前用户开机自启，无需管理员权限（Windows 注册表 / Linux `.desktop`）
+- Windows 使用 DPAPI 保存密码；Linux 优先使用桌面 Secret Service，未安装时使用仅当前用户可读的配置文件
 - 界面仅保留最近 3 小时日志
 - 完整日志按天保存，自动删除 7 天前的日志
 - 支持 PyInstaller 单文件 EXE 和 GitHub Actions 自动构建
 
 ## 系统要求
 
-- Windows 10 或 Windows 11
+- Windows 10 / 11 或 Ubuntu 22.04+ 等主流 Linux 桌面发行版
 - 运行源码时需要 Python 3.10 或更高版本
 - 已连接 `SZU_WLAN` 或深圳大学校园有线网络
 
@@ -50,18 +52,78 @@
 
 1. 输入校园网账号和统一身份认证密码。
 2. 按电脑的实际位置选择区域：实验室电脑选择“教学 / 办公区”，宿舍电脑选择“宿舍区”。不建议长期无人值守的电脑使用实验性自动模式。
-3. 设置检测间隔，推荐 3～5 分钟。
+3. 设置检测间隔，默认 1 分钟，可按需调整。
 4. 根据需要勾选“开机自动启动”。
 5. 点击“开始守护”。
-6. 最小化或关闭窗口，程序会进入系统托盘继续监控。
+6. 关闭或最小化窗口时程序不会退出，而是隐藏到系统托盘继续监控（单击/双击托盘图标或选择“打开主界面”恢复）。
+7. 真正退出：托盘菜单“退出程序”，或界面右下角的“退出程序”按钮。
 
 ### 方式二：使用源码运行
 
-```powershell
-git clone https://github.com/Georgeupup/szu-network-guardian.git
+```bash
+git clone https://github.com/doublenuo/szu-network-guardian.git
 cd szu-network-guardian
+python3 -m venv .venv
+. .venv/bin/activate
 python -m pip install -r requirements.txt
 python main.py
+```
+
+### Tauri 桌面端（推荐 Linux）
+
+Ubuntu 24.04 先安装 Tauri 的 WebKitGTK 开发依赖：
+
+```bash
+sudo apt install libwebkit2gtk-4.1-dev \
+  build-essential curl wget file libssl-dev libayatana-appindicator3-dev \
+  librsvg2-dev
+```
+
+然后运行 React/Tauri 前端：
+
+```bash
+npm install
+npm run tauri dev
+```
+
+构建 Linux 安装包：
+
+```bash
+npm run build
+```
+
+安装构建出的 deb（推荐，会装到 `/usr/bin/szu-network-guardian` 并写入应用菜单图标）：
+
+```bash
+sudo dpkg -i "src-tauri/target/release/bundle/deb/SZU Network Guardian_1.2.0_amd64.deb"
+```
+
+> [!IMPORTANT]
+> 安装或移动程序后，请在界面里取消并重新勾选“开机自动启动”（或直接点“保存设置”），让自启动项更新为新的可执行文件路径。
+
+GNOME（Ubuntu 默认桌面）需要 AppIndicator 扩展才能显示托盘图标，未安装时执行：
+
+```bash
+sudo apt install gnome-shell-extension-appindicator
+```
+
+开发模式会调用项目根目录的 `.venv/bin/python3`（不存在时使用 `python3`）运行认证桥接。Linux `.deb` 发行包会内置 `backend_api.py` 和 `szu_guardian`，运行时使用系统 `python3` 及 `python3-requests`。
+
+### Android 移动端
+
+Android 端是独立的 Kotlin 原生工程，认证协议与桌面端 Python 核心保持一致（见 [android/README.md](android/README.md)）：
+
+```bash
+cd android
+./gradlew assembleDebug     # app/build/outputs/apk/debug/app-debug.apk
+```
+
+也可以直接用 Android Studio 打开仓库里的 `android` 目录运行。Android 上用前台服务常驻通知栏代替系统托盘，用 `BOOT_COMPLETED` 广播实现开机自启。
+
+Ubuntu 24.04 如果尚未安装 Tk，先运行：
+
+```bash
+sudo apt install python3-tk
 ```
 
 ## 构建 Windows EXE
@@ -75,23 +137,35 @@ python main.py
 构建脚本会创建独立的 `.venv-build` 环境、执行自动化测试，并生成：
 
 ```text
-dist\SZU-Network-Guardian-v1.1.1.exe
+dist\SZU-Network-Guardian-v1.2.0.exe
 ```
 
-也可以在仓库的 [Actions 页面](https://github.com/Georgeupup/szu-network-guardian/actions/workflows/build-windows.yml) 手动运行 `Build Windows EXE`，然后下载构建产物。
+也可以在仓库的 [Actions 页面](https://github.com/doublenuo/szu-network-guardian/actions/workflows/build-windows.yml) 手动运行构建流程，然后下载 Windows、Ubuntu 和 Android 构建产物。
 
 > [!IMPORTANT]
 > 请先把 EXE 移动到最终位置，再勾选“开机自动启动”。开机启动项会记录 EXE 的当前位置；移动文件后需要取消并重新勾选。
 
 ## 配置与日志
 
-配置文件：
+配置文件（Windows）：
 
 ```text
 %LOCALAPPDATA%\SZUNetworkGuardian\config.json
 ```
 
-完整日志：
+Linux 默认配置文件：
+
+```text
+~/.config/SZUNetworkGuardian/config.json
+```
+
+Linux 默认完整日志目录：
+
+```text
+~/.config/SZUNetworkGuardian/logs
+```
+
+Windows 完整日志：
 
 ```text
 %LOCALAPPDATA%\SZUNetworkGuardian\logs
@@ -99,10 +173,16 @@ dist\SZU-Network-Guardian-v1.1.1.exe
 
 日志使用 `guardian-YYYY-MM-DD.log` 命名。程序启动时和运行期间会自动清理 7 天前的日志。
 
-开机自启使用当前用户注册表项：
+Windows 开机自启使用当前用户注册表项：
 
 ```text
 HKEY_CURRENT_USER\Software\Microsoft\Windows\CurrentVersion\Run
+```
+
+Linux 开机自启使用：
+
+```text
+~/.config/autostart/SZUNetworkGuardian.desktop
 ```
 
 ## 认证接口
@@ -117,13 +197,14 @@ HKEY_CURRENT_USER\Software\Microsoft\Windows\CurrentVersion\Run
 - `szu_guardian/srun.py`：SRun 加密和登录流程
 - `szu_guardian/network.py`：区域识别、联网检测和重连流程
 - `szu_guardian/monitor.py`：后台监控调度
-- `szu_guardian/tray.py`：Windows 系统托盘
+- `szu_guardian/tray.py`：跨平台系统托盘
 
 ## 项目结构
 
 ```text
 .
 ├── .github/workflows/       # Windows 自动构建
+├── android/                 # Android 原生客户端（Kotlin + Compose）
 ├── szu_guardian/
 │   ├── local_log.py         # 本地日志与自动清理
 │   ├── monitor.py           # 后台监控
@@ -143,8 +224,8 @@ HKEY_CURRENT_USER\Software\Microsoft\Windows\CurrentVersion\Run
 
 - 源码和构建产物不包含预设账号或密码。
 - 运行日志不会输出密码、认证 challenge 或完整认证载荷。
-- 密码通过 Windows DPAPI 加密，通常只能由保存它的同一 Windows 用户解密。
-- 请勿把 `%LOCALAPPDATA%\SZUNetworkGuardian\config.json` 上传到公共仓库。
+- Windows 密码通过 DPAPI 保存，通常只能由保存它的同一 Windows 用户解密；Linux 优先使用 Secret Service。
+- 请勿把配置文件上传到公共仓库。Linux 配置文件位于 `~/.config/SZUNetworkGuardian/config.json`。
 
 ## Acknowledgements / 致谢
 
